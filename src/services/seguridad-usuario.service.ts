@@ -83,11 +83,21 @@ export class SeguridadUsuarioService {
    */
   crearToken(usuario: Usuario): string{
     let datos={
-      name:`${usuario.primerNombre} ${usuario.segundoNombre} ${usuario.primerApellido} ${usuario.segundoApellido}`, 
+      name: `${usuario.primerNombre} ${usuario.segundoNombre} ${usuario.primerApellido} ${usuario.segundoApellido}`, 
       role: usuario.rolId,
       email: usuario.correo
     };
     let token = jwt.sign(datos, ConfiguracionSeguriad.claveJWT);
-    return token
+    return token;
+  }
+
+  /**
+   * Valida y obtiene el rol de un token
+   * @param tk  el token
+   * @returns  el _id del rol
+   */
+  obtenerRolDesdeToke(tk: string): string{
+    let obj = jwt.verify(tk, ConfiguracionSeguriad.claveJWT)
+    return obj.role;
   }
 }
