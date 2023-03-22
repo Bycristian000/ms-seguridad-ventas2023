@@ -1,5 +1,5 @@
-import { service } from '@loopback/core';
-import{authenticate} from '@loopback/authentication';
+import {authenticate} from '@loopback/authentication';
+import {service} from '@loopback/core';
 import {
   Count,
   CountSchema,
@@ -9,30 +9,39 @@ import {
   Where,
 } from '@loopback/repository';
 import {
-  post,
-  param,
+  del,
   get,
   getModelSchemaRef,
+  HttpErrors,
+  param,
   patch,
+  post,
   put,
-  del,
   requestBody,
   response,
-  HttpErrors,
-} from '@loopback/rest'
-import {Credenciales, FactorDeAutenticacionPorCodigo, Login, Usuario} from '../models';
+} from '@loopback/rest';
+import {UserProfile} from '@loopback/security';
+import {ConfiguracionSeguriad} from '../config/seguridad.config';
+import {
+  Credenciales,
+  FactorDeAutenticacionPorCodigo,
+  Login,
+  PermisosRolMenu,
+  Usuario,
+} from '../models';
 import {LoginRepository, UsuarioRepository} from '../repositories';
-import { SeguridadUsuarioService } from '../services';
-import { ConfiguracionSeguriad } from '../config/seguridad.config';
+import {AuthService, SeguridadUsuarioService} from '../services';
 
 export class UsuarioController {
   constructor(
     @repository(UsuarioRepository)
-    public usuarioRepository : UsuarioRepository,
+    public usuarioRepository: UsuarioRepository,
     @service(SeguridadUsuarioService)
     public servicioSeguridad: SeguridadUsuarioService,
     @repository(LoginRepository)
-    public repositorioLogin: LoginRepository
+    public repositorioLogin: LoginRepository,
+    @service(AuthService)
+    private servicioAuth: AuthService,
   ) {}
 
   @post('/usuario')
@@ -69,15 +78,15 @@ export class UsuarioController {
     description: 'Usuario model count',
     content: {'application/json': {schema: CountSchema}},
   })
-  async count(
-    @param.where(Usuario) where?: Where<Usuario>,
-  ): Promise<Count> {
-
+  async count(@param.where(Usuario) where?: Where<Usuario>): Promise<Count> {
     return this.usuarioRepository.count(where);
   }
   @authenticate({
-    strategy: "auth",
-    options: [ConfiguracionSeguriad.menuUsuarioID, ConfiguracionSeguriad.listarAccion]
+    strategy: 'auth',
+    options: [
+      ConfiguracionSeguriad.menuUsuarioID,
+      ConfiguracionSeguriad.listarAccion,
+    ],
   })
   @get('/usuario')
   @response(200, {
@@ -127,7 +136,8 @@ export class UsuarioController {
   })
   async findById(
     @param.path.string('id') id: string,
-    @param.filter(Usuario, {exclude: 'where'}) filter?: FilterExcludingWhere<Usuario>
+    @param.filter(Usuario, {exclude: 'where'})
+    filter?: FilterExcludingWhere<Usuario>,
   ): Promise<Usuario> {
     return this.usuarioRepository.findById(id, filter);
   }
@@ -175,83 +185,102 @@ export class UsuarioController {
 
   @post('/identificar-usuario')
   @response(200, {
-    description:"identificar al usuario por correo y clave",
-    content:{'application/json':{schema: getModelSchemaRef(Usuario)}}
+    description: 'identificar al usuario por correo y clave',
+    content: {'application/json': {schema: getModelSchemaRef(Usuario)}},
   })
   async identificarUsuario(
-    @requestBody(
-      {
-        content:{
-          'application/json':{
-            schema: getModelSchemaRef(Credenciales)
-          }
-        }
-      }
-    )
-    credenciales: Credenciales
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: getModelSchemaRef(Credenciales),
+        },
+      },
+    })
+    credenciales: Credenciales,
   ): Promise<object> {
-    let usuario= await this.servicioSeguridad.identificarUsuario(credenciales)
-    if (usuario){
+    let usuario = await this.servicioSeguridad.identificarUsuario(credenciales);
+    if (usuario) {
       let codigo2fa = this.servicioSeguridad.crearTextoAleatorio(5);
       console.log(codigo2fa);
       let login: Login = new Login();
       login.usuarioId = usuario._id!;
       login.codigo2fa = codigo2fa;
-      login.estadoCodigo2fa= false;
-      login.token="";
-      login.estadoToken=false;
+      login.estadoCodigo2fa = false;
+      login.token = '';
+      login.estadoToken = false;
       this.repositorioLogin.create(login);
-      usuario.clave = "";
+      usuario.clave = '';
       // notificar al usuario via correo o sms
       return usuario;
     }
-    return new HttpErrors[401]("Credenciales incorrectas");
+    return new HttpErrors[401]('Credenciales incorrectas');
   }
 
-
-@post('/verificar-2fa')
+  @post('/verificar-2fa')
   @response(200, {
-    description:"Validar un codigo de 2fa"
+    description: 'Validar un codigo de 2fa',
   })
   async VerificarCodigo2fa(
-    @requestBody(
-      {
-        content:{
-          'application/json':{
-            schema: getModelSchemaRef(FactorDeAutenticacionPorCodigo)
-          }
-        }
-      }
-    )
-    credenciales: FactorDeAutenticacionPorCodigo
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: getModelSchemaRef(FactorDeAutenticacionPorCodigo),
+        },
+      },
+    })
+    credenciales: FactorDeAutenticacionPorCodigo,
   ): Promise<object> {
-    let usuario= await this.servicioSeguridad.validarCodigo2fa(credenciales);
-    if(usuario){
-      let token =  this.servicioSeguridad.crearToken(usuario);
-      if(usuario){
-        usuario.clave = "";
+    let usuario = await this.servicioSeguridad.validarCodigo2fa(credenciales);
+    if (usuario) {
+      let token = this.servicioSeguridad.crearToken(usuario);
+      if (usuario) {
+        usuario.clave = '';
         try {
           this.usuarioRepository.logins(usuario._id).patch(
             {
               estadoCodigo2fa: true,
-              token: token
+              token: token,
             },
             {
-              estadoCodigo2fa:false
-            });
-            
+              estadoCodigo2fa: false,
+            },
+          );
         } catch {
-          console.log("No se ha almacenado el cambio del estado de token en la base de datos")
+          console.log(
+            'No se ha almacenado el cambio del estado de token en la base de datos',
+          );
         }
         return {
           user: usuario,
-          token: token
+          token: token,
         };
       }
     }
-    return new HttpErrors[401]("Codigo de 2fa invalido para el usuario definido");
+    return new HttpErrors[401](
+      'Codigo de 2fa invalido para el usuario definido',
+    );
+  }
+
+  @post('/validar-permisos')
+  @response(200, {
+    description: 'Validación de permisos de usuario para logica de negocio',
+    content: {'application/json': {schema: getModelSchemaRef(PermisosRolMenu)}},
+  })
+  async ValidarPermisosDeUsuario(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: getModelSchemaRef(PermisosRolMenu),
+        },
+      },
+    })
+    datos: PermisosRolMenu,
+  ): Promise<UserProfile | undefined> {
+    let idRol = this.servicioSeguridad.obtenerRolDesdeToke(datos.token);
+    return this.servicioAuth.VerificarPermisoDeUsuarioPorRol(
+      idRol,
+      datos.idMenu,
+      datos.accion,
+    );
   }
 }
-
-
-
